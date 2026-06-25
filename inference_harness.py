@@ -509,18 +509,296 @@ def _display(image: np.ndarray, output_path: str = "inference_result.png") -> No
 # Entry point
 # ===========================================================================
 
+def _run_compare(
+    image_a: str,
+    image_b: str,
+    dist_a: float,
+    dist_b: float,
+) -> None:
+    """
+    Run the full inference pipeline on two target images in complete isolation,
+    generate a side-by-side visual overlay, print a telemetry diff table to the
+    terminal, and save a structured JSON payload to disk.
+
+    Parameters
+    ----------
+    image_a, image_b: Paths to the two target images.
+    dist_a, dist_b:   Shooting distances in metres for each session.
+    """
+    _COMPARE_OUT = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "zeroing_comparison.png",
+    )
+    _JSON_OUT = _COMPARE_OUT.replace(".png", ".json")
+
+    print()
+    print("=" * 64)
+    print(">> COMPARE MODE — DUAL SESSION BALLISTIC EVALUATION")
+    print("=" * 64)
+    print(f"   Session A : {image_a}  @ {dist_a:.0f} m")
+    print(f"   Session B : {image_b}  @ {dist_b:.0f} m")
+    print()
+
+    # ── Fully isolated inference runs ────────────────────────────────────────
+    print("[SESSION A]")
+    res_a = simulate_target_inference(image_a, dist_a)
+    print()
+    print("[SESSION B]")
+    res_b = simulate_target_inference(image_b, dist_b)
+    print()
+
+    # ── Variance calculations ────────────────────────────────────────────────
+    hits_a  = len(res_a["shots"])
+    hits_b  = len(res_b["shots"])
+
+    delta_mpi_x = round(res_b["mpi"]["x"] - res_a["mpi"]["x"], 2)
+    delta_mpi_y = round(res_b["mpi"]["y"] - res_a["mpi"]["y"], 2)
+
+    delta_dev_h = round(res_b["deviation_cm"]["x"] - res_a["deviation_cm"]["x"], 2)
+    delta_dev_v = round(res_b["deviation_cm"]["y"] - res_a["deviation_cm"]["y"], 2)
+
+    delta_clicks_h = res_b["scope_clicks"]["horizontal"] - res_a["scope_clicks"]["horizontal"]
+    delta_clicks_v = res_b["scope_clicks"]["vertical"]   - res_a["scope_clicks"]["vertical"]
+
+    # ── Terminal diff table ──────────────────────────────────────────────────
+    _print_diff_table(
+        res_a=res_a, res_b=res_b,
+        image_a=image_a, image_b=image_b,
+        dist_a=dist_a, dist_b=dist_b,
+        hits_a=hits_a, hits_b=hits_b,
+        delta_mpi_x=delta_mpi_x, delta_mpi_y=delta_mpi_y,
+        delta_dev_h=delta_dev_h, delta_dev_v=delta_dev_v,
+        delta_clicks_h=delta_clicks_h, delta_clicks_v=delta_clicks_v,
+    )
+
+    # ── Side-by-side matplotlib canvas ──────────────────────────────────────
+    img_a_rgb = cv2.cvtColor(res_a["image"], cv2.COLOR_BGR2RGB)
+    img_b_rgb = cv2.cvtColor(res_b["image"], cv2.COLOR_BGR2RGB)
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 9), dpi=150)
+    fig.patch.set_facecolor("#0a0a0a")
+
+    for ax, img_rgb, title, res, dist, img_path in [
+        (axes[0], img_a_rgb, "SESSION A", res_a, dist_a, image_a),
+        (axes[1], img_b_rgb, "SESSION B", res_b, dist_b, image_b),
+    ]:
+        ax.imshow(img_rgb)
+        ax.axis("off")
+        src = os.path.basename(img_path)
+        hits = len(res["shots"])
+        mpi  = res["mpi"]
+        instr = res["instruction"]
+        subtitle = (
+            f"{src}  |  {dist:.0f} m  |  {hits} hit(s)\n"
+            f"MPI ({mpi['x']:.1f}, {mpi['y']:.1f}) px\n"
+            f"{instr}"
+        )
+        ax.set_title(
+            f"{title}\n{subtitle}",
+            fontsize=9, color="white", loc="center", pad=6,
+            fontfamily="monospace",
+        )
+        ax.set_facecolor("#0a0a0a")
+
+    # Diff annotation between the two panels
+    diff_txt = (
+        f"ΔMPI  x={delta_mpi_x:+.1f} px  y={delta_mpi_y:+.1f} px  |  "
+        f"ΔDev  H={delta_dev_h:+.2f} cm  V={delta_dev_v:+.2f} cm  |  "
+        f"ΔClicks  H={delta_clicks_h:+d}  V={delta_clicks_v:+d}"
+    )
+    fig.text(
+        0.5, 0.01, diff_txt,
+        ha="center", va="bottom", fontsize=8.5,
+        color="#00e5e5", fontfamily="monospace",
+        bbox=dict(boxstyle="round,pad=0.4", facecolor="#111111", edgecolor="#333333"),
+    )
+
+    plt.suptitle(
+        "TARGETRANGE.AI — DUAL SESSION ZEROING COMPARISON",
+        fontsize=13, color="white", fontfamily="monospace", y=0.99,
+    )
+    plt.tight_layout(rect=[0, 0.04, 1, 0.97])
+    plt.savefig(_COMPARE_OUT, dpi=150, bbox_inches="tight",
+                facecolor=fig.get_facecolor())
+    plt.close(fig)                  # no plt.show() — guaranteed no thread lock
+    print(f"   [+] Comparison PNG → {_COMPARE_OUT}")
+
+    # ── JSON payload ─────────────────────────────────────────────────────────
+    payload = {
+        "session_a": {
+            "source":           os.path.basename(image_a),
+            "distance_m":       dist_a,
+            "total_hits":       hits_a,
+            "shots":            res_a["shots"],
+            "mpi":              res_a["mpi"],
+            "deviation_px":     res_a["deviation_px"],
+            "deviation_cm":     res_a["deviation_cm"],
+            "scope_clicks":     res_a["scope_clicks"],
+            "scope_directions": res_a["scope_directions"],
+            "instruction":      res_a["instruction"],
+        },
+        "session_b": {
+            "source":           os.path.basename(image_b),
+            "distance_m":       dist_b,
+            "total_hits":       hits_b,
+            "shots":            res_b["shots"],
+            "mpi":              res_b["mpi"],
+            "deviation_px":     res_b["deviation_px"],
+            "deviation_cm":     res_b["deviation_cm"],
+            "scope_clicks":     res_b["scope_clicks"],
+            "scope_directions": res_b["scope_directions"],
+            "instruction":      res_b["instruction"],
+        },
+        "variance": {
+            "hit_count_delta":        hits_b - hits_a,
+            "mpi_shift_px":           {"delta_x": delta_mpi_x, "delta_y": delta_mpi_y},
+            "group_deviation_shift_cm": {"delta_h": delta_dev_h, "delta_v": delta_dev_v},
+            "click_adjustment_delta": {
+                "horizontal": delta_clicks_h,
+                "vertical":   delta_clicks_v,
+                "interpretation": (
+                    f"To bridge from Session A zero to Session B zero: "
+                    f"move {'RIGHT' if delta_clicks_h < 0 else 'LEFT'} "
+                    f"{abs(delta_clicks_h)} click(s) and "
+                    f"{'UP' if delta_clicks_v < 0 else 'DOWN'} "
+                    f"{abs(delta_clicks_v)} click(s)."
+                    if delta_clicks_h != 0 or delta_clicks_v != 0
+                    else "Sessions are ballistically equivalent — no bridging adjustment required."
+                ),
+            },
+        },
+    }
+
+    with open(_JSON_OUT, "w") as fh:
+        json.dump(payload, fh, indent=2)
+    print(f"   [+] Comparison JSON → {_JSON_OUT}")
+    print()
+    print(">> COMPARE MODE COMPLETE.")
+    print()
+
+
+def _print_diff_table(
+    *,
+    res_a: dict,
+    res_b: dict,
+    image_a: str,
+    image_b: str,
+    dist_a: float,
+    dist_b: float,
+    hits_a: int,
+    hits_b: int,
+    delta_mpi_x: float,
+    delta_mpi_y: float,
+    delta_dev_h: float,
+    delta_dev_v: float,
+    delta_clicks_h: int,
+    delta_clicks_v: int,
+) -> None:
+    """Print a well-aligned terminal telemetry diff table."""
+    W = 65
+    SEP = "─" * W
+
+    def row(label: str, val_a: str, val_b: str, diff: str) -> str:
+        return f"  {label:<24} {val_a:>10}   {val_b:>10}   {diff:>10}"
+
+    print(SEP)
+    print(f"  {'METRIC':<24} {'SESSION A':>10}   {'SESSION B':>10}   {'DELTA':>10}")
+    print(SEP)
+    print(row("Total Hits",
+              str(hits_a),
+              str(hits_b),
+              f"{hits_b - hits_a:+d}"))
+    print(row("Distance (m)",
+              f"{dist_a:.0f} m",
+              f"{dist_b:.0f} m",
+              f"{dist_b - dist_a:+.0f} m"))
+    print(row("MPI X (px)",
+              f"{res_a['mpi']['x']:.1f}",
+              f"{res_b['mpi']['x']:.1f}",
+              f"{delta_mpi_x:+.1f}"))
+    print(row("MPI Y (px)",
+              f"{res_a['mpi']['y']:.1f}",
+              f"{res_b['mpi']['y']:.1f}",
+              f"{delta_mpi_y:+.1f}"))
+    print(row("Deviation H (cm)",
+              f"{res_a['deviation_cm']['x']:+.2f}",
+              f"{res_b['deviation_cm']['x']:+.2f}",
+              f"{delta_dev_h:+.2f}"))
+    print(row("Deviation V (cm)",
+              f"{res_a['deviation_cm']['y']:+.2f}",
+              f"{res_b['deviation_cm']['y']:+.2f}",
+              f"{delta_dev_v:+.2f}"))
+    print(row(f"Clicks H ({res_a['scope_directions']['horizontal']}/{res_b['scope_directions']['horizontal']})",
+              str(res_a["scope_clicks"]["horizontal"]),
+              str(res_b["scope_clicks"]["horizontal"]),
+              f"{delta_clicks_h:+d}"))
+    print(row(f"Clicks V ({res_a['scope_directions']['vertical']}/{res_b['scope_directions']['vertical']})",
+              str(res_a["scope_clicks"]["vertical"]),
+              str(res_b["scope_clicks"]["vertical"]),
+              f"{delta_clicks_v:+d}"))
+    print(SEP)
+    # Bridging instruction
+    if delta_clicks_h != 0 or delta_clicks_v != 0:
+        h_dir = "RIGHT" if delta_clicks_h < 0 else "LEFT"
+        v_dir = "UP"    if delta_clicks_v < 0 else "DOWN"
+        print(f"  >> BRIDGE ZERO: {abs(delta_clicks_h)} click(s) {h_dir} | "
+              f"{abs(delta_clicks_v)} click(s) {v_dir}")
+    else:
+        print("  >> Sessions are ballistically equivalent — no bridging required.")
+    print(SEP)
+    print()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="TargetRange.AI — ASI local inference testing harness"
     )
+    # Single-image mode
     parser.add_argument("--image",    type=str,   default=None,
                         help="Path to target image (JPEG/PNG). Default: synthetic canvas.")
     parser.add_argument("--distance", type=float, default=100.0,
-                        help="Shooting distance in metres (default: 100.0).")
+                        help="Shooting distance in metres for single-image mode (default: 100.0).")
     parser.add_argument("--output",   type=str,   default="inference_result.png",
                         help="Output PNG file name (default: inference_result.png).")
+    # Compare mode
+    parser.add_argument("--compare",   nargs=2,   metavar=("IMAGE_A", "IMAGE_B"),
+                        default=None,
+                        help="Compare mode: provide two image paths (e.g. --compare a.png b.png).")
+    parser.add_argument("--distances", nargs="+",  type=float, metavar="DIST",
+                        default=None,
+                        help=(
+                            "Distance(s) in metres for compare mode. "
+                            "Supply one value (used for both) or two (one per image). "
+                            "Example: --distances 100 200"
+                        ))
     args = parser.parse_args()
 
+    # =========================================================================
+    # COMPARE MODE
+    # =========================================================================
+    if args.compare:
+        image_a, image_b = args.compare
+
+        # Resolve distances: --distances overrides --distance for compare mode
+        if args.distances:
+            dists = args.distances
+            dist_a = float(dists[0])
+            dist_b = float(dists[1]) if len(dists) > 1 else dist_a
+        else:
+            dist_a = dist_b = args.distance
+
+        # Validate both paths exist before starting
+        for path, label in [(image_a, "IMAGE_A"), (image_b, "IMAGE_B")]:
+            if not os.path.isfile(path):
+                print(f"[ERROR] {label} not found: '{path}'")
+                sys.exit(1)
+
+        _run_compare(image_a, image_b, dist_a, dist_b)
+        sys.exit(0)
+
+    # =========================================================================
+    # SINGLE-IMAGE MODE
+    # =========================================================================
     print()
     print("=" * 64)
     print(">> INITIALIZING ARTIFICIAL SOLDIER INTELLIGENCE")
