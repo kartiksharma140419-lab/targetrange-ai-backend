@@ -1,0 +1,118 @@
+{
+  "session_a": {
+    "source": "train_sample_1.png",
+    "distance_m": 100.0,
+    "total_hits": 5,
+    "shots": [
+      [
+        321,
+        339
+      ],
+      [
+        448,
+        307
+      ],
+      [
+        620,
+        297
+      ],
+      [
+        389,
+        259
+      ],
+      [
+        388,
+        208
+      ]
+    ],
+    "mpi": {
+      "x": 433.2,
+      "y": 282.0
+    },
+    "deviation_px": {
+      "x": 113.2,
+      "y": 38.0
+    },
+    "deviation_cm": {
+      "x": 5.66,
+      "y": 1.9
+    },
+    "scope_clicks": {
+      "horizontal": 6,
+      "vertical": 2
+    },
+    "scope_directions": {
+      "horizontal": "LEFT",
+      "vertical": "DOWN"
+    },
+    "instruction": "Adjust turrets: 6 clicks LEFT | 2 clicks DOWN"
+  },
+  "session_b": {
+    "source": "train_sample_2.png",
+    "distance_m": 200.0,
+    "total_hits": 6,
+    "shots": [
+      [
+        274,
+        329
+      ],
+      [
+        321,
+        310
+      ],
+      [
+        266,
+        296
+      ],
+      [
+        204,
+        258
+      ],
+      [
+        331,
+        260
+      ],
+      [
+        291,
+        250
+      ]
+    ],
+    "mpi": {
+      "x": 281.17,
+      "y": 283.83
+    },
+    "deviation_px": {
+      "x": -38.83,
+      "y": 36.17
+    },
+    "deviation_cm": {
+      "x": -3.88,
+      "y": 3.62
+    },
+    "scope_clicks": {
+      "horizontal": 2,
+      "vertical": 2
+    },
+    "scope_directions": {
+      "horizontal": "RIGHT",
+      "vertical": "DOWN"
+    },
+    "instruction": "Adjust turrets: 2 clicks RIGHT | 2 clicks DOWN"
+  },
+  "variance": {
+    "hit_count_delta": 1,
+    "mpi_shift_px": {
+      "delta_x": -152.03,
+      "delta_y": 1.83
+    },
+    "group_deviation_shift_cm": {
+      "delta_h": -9.54,
+      "delta_v": 1.72
+    },
+    "click_adjustment_delta": {
+      "horizontal": -4,
+      "vertical": 0,
+      "interpretation": "To bridge from Session A zero to Session B zero: move RIGHT 4 click(s) and DOWN 0 click(s)."
+    }
+  }
+}
